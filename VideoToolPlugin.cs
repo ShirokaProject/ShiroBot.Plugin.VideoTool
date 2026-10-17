@@ -8,7 +8,7 @@ using ShiroBot.SDK.Plugin;
 
 namespace ShiroBot.Plugin.VideoTool;
 
-[BotPlugin("VideoToGif", Name = "VideoTool 视频工具箱", Version = "0.1.1", Author = "greepar",
+[BotPlugin("VideoToGif", Name = "VideoTool 视频工具箱", Version = "0.1.2", Author = "greepar",
     Description = "视频 GIF、截取、MP3、目标大小压缩、封面和信息查询；支持跨平台硬件编码实测、CPU 回退及 WebUI 配置。",
     GithubRepo = "ShirokaProject/ShiroBot.Plugin.VideoTool",
     Category = PluginCategory.Utility, IsPluginSingleFile = true,
@@ -73,6 +73,7 @@ public sealed class VideoToolPlugin : PluginBase<PluginConfig>, IPluginActionPro
         timeout.CancelAfter(TimeSpan.FromSeconds(config.TimeoutSeconds));
         var token = timeout.Token;
         string? input = null;
+        var notice = new ProcessingNotice(Context, message);
         try
         {
             config.Validate();
@@ -93,7 +94,7 @@ public sealed class VideoToolPlugin : PluginBase<PluginConfig>, IPluginActionPro
             VideoOperations.CheckTools(command.Operation, config);
             var temp = Context.CreateTempDirectory(TimeSpan.FromSeconds(config.TimeoutSeconds + 600));
             input = Path.Combine(temp.Path, "input.mp4");
-            await Context.Message.ReplyAsync(message, [new TextSegment("正在处理视频…")], token);
+            await notice.ShowAsync(token);
             await DownloadAsync(url, input, config.MaxInputMiB * 1024L * 1024L, token);
             var output = await VideoOperations.ExecuteAsync(command, input, temp.Path, config, token);
             var sent = await SendOutputAsync(message, output, token);
@@ -114,6 +115,7 @@ public sealed class VideoToolPlugin : PluginBase<PluginConfig>, IPluginActionPro
         }
         finally
         {
+            await notice.ClearAsync();
             if (input is not null)
             {
                 try { File.Delete(input); }

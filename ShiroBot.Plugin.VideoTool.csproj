@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <Authors>greepar</Authors>
     <Description>ShiroBot 视频工具箱：GIF、截取、MP3、硬件压缩、封面和信息查询，支持跨平台编码器实际探测及 CPU 回退。</Description>
     <RepositoryUrl>https://github.com/ShirokaProject/ShiroBot.Plugin.VideoTool</RepositoryUrl>

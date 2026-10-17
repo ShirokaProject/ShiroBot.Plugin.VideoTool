@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
+using ShiroBot.Model.QQ;
 using ShiroBot.Plugin.VideoTool;
 using ShiroBot.SDK.Config;
 using ShiroBot.SDK.Models;
@@ -23,6 +24,19 @@ internal static class PluginVerification
         var slowStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var serving = ServeAsync(server, input, audioInput, slowStarted, stop.Token);
         var replies = new ConcurrentQueue<MessageSegment[]>();
+        var notices = new List<string>();
+        var deleted = new List<MessageReference>();
+        var reactions = new List<bool>();
+        var rejectReactions = false;
+        IQGroupApi? groupApi = null;
+        var reactionApi = StubProxy.Make<IQGroupApi>((method, args) =>
+        {
+            if (method.Name != "SendMessageReactionAsync") throw new NotSupportedException(method.Name);
+            Check((string)args![2]! == "351", "Processing uses the same reaction as MyParser");
+            if (rejectReactions) throw new NotSupportedException("Reactions unsupported");
+            reactions.Add((bool)args[3]!);
+            return Task.CompletedTask;
+        });
         var quotedReplies = 0;
         var tempDirectories = new List<string>();
         var config = new PluginConfig { FfmpegPath = ffmpeg, GifsiclePath = gifsicle, Width = 64, Height = 64, DurationSeconds = 0.5, MaxInputMiB = 1 };
@@ -32,6 +46,7 @@ internal static class PluginVerification
             "ReplyAsync" or "QuoteReplyAsync" => Reply(args!, method.Name == "QuoteReplyAsync"),
             "GetMessageAsync" => Task.FromResult<MessageEvent?>(quoted),
             "GetResourceUrlAsync" => Task.FromResult(baseUrl + "source.mp4"),
+            "DeleteMessageAsync" => Delete(args!),
             _ => throw new NotSupportedException(method.Name)
         });
         var settings = StubProxy.Make<IConfigContext>((method, _) => method.Name == "Load" ? config : throw new NotSupportedException(method.Name));
@@ -40,6 +55,7 @@ internal static class PluginVerification
             "get_Config" => settings,
             "get_Message" => messages,
             "CreateTempDirectory" => Temp((TimeSpan)args![0]!),
+            "GetAdapterExtension" => groupApi,
             _ => throw new NotSupportedException(method.Name)
         });
         var plugin = new VideoToolPlugin();
@@ -50,10 +66,13 @@ internal static class PluginVerification
             var events = (IBotEventSubscriber)plugin;
             await events.OnEventAsync(Message(Channel.Direct("user"), new TextSegment("#gif " + baseUrl + "source.mp4")));
             Check(replies.SelectMany(x => x).OfType<ImageSegment>().Count() == 1, "Direct command downloads, converts and replies with an image");
+            Check(notices.Count == 1 && deleted.Single().MessageId == notices.Single() && deleted[0].InstanceId == "test-instance", "Without reactions, the processing text is recalled from the original instance after completion");
             var initialImage = replies.SelectMany(x => x).OfType<ImageSegment>().Single();
             Check(File.Exists(new Uri(initialImage.Uri).LocalPath) && tempDirectories.All(d => !File.Exists(Path.Combine(d, "input.mp4"))), "Output survives sending while downloaded input is removed");
             await ((IConfigurableComponent)plugin).ApplyConfigAsync(new PluginConfig { FfmpegPath = ffmpeg, GifsiclePath = gifsicle, Width = 80, Height = 48, DurationSeconds = 0.5, MaxInputMiB = 1 });
+            groupApi = reactionApi;
             await events.OnEventAsync(Message(Channel.Group("group"), new QuoteSegment("source"), new TextSegment("2gif")));
+            Check(reactions.SequenceEqual(new[] { true, false }) && notices.Count == 1, "Supported group reactions are added then removed without sending processing text");
             var images = replies.SelectMany(x => x).OfType<ImageSegment>().ToArray();
             Check(images.Length == 2 && images[1].Width == 80 && images[1].Height == 48 && quotedReplies == 2, "2gif on a quoted group video converts and quotes the command using hot-updated config");
 
@@ -80,6 +99,7 @@ internal static class PluginVerification
 
             await events.OnEventAsync(Message(Channel.Direct("user"), new TextSegment("#gif " + baseUrl + "oversize.mp4")));
             Check(replies.SelectMany(x => x).OfType<TextSegment>().Any(t => t.Text.Contains("下载限制")), "Oversize HTTP response is rejected before download");
+            Check(notices.All(id => deleted.Any(d => d.MessageId == id)), "Processing text is also recalled after a failed download");
             var imagesBefore = replies.SelectMany(x => x).OfType<ImageSegment>().Count();
             await events.OnEventAsync(Message(Channel.Direct("user"), new TextSegment("#gif " + baseUrl + "chunked.mp4")));
             Check(replies.SelectMany(x => x).OfType<ImageSegment>().Count() == imagesBefore && tempDirectories.All(d => !File.Exists(Path.Combine(d, "input.mp4"))), "Download without Content-Length stops at the actual byte limit and removes the partial input");
@@ -90,8 +110,12 @@ internal static class PluginVerification
 
             await ((IConfigurableComponent)plugin).ApplyConfigAsync(new PluginConfig { FfmpegPath = ffmpeg, GifsiclePath = gifsicle, VideoMaxHeight = 180, VideoMaxFps = 12, VideoPreset = "veryfast", AllowCpuFallback = true });
             quoted = Message(Channel.Group("group"), new VideoSegment(baseUrl + "audio.mp4"));
+            rejectReactions = true;
+            var noticesBefore = notices.Count;
             await events.OnEventAsync(Message(Channel.Group("group"), new QuoteSegment("source"), new TextSegment("vinfo")));
             Check(replies.SelectMany(x => x).OfType<TextSegment>().Any(t => t.Text.Contains("640×360") && t.Text.Contains("aac")), "Quoted vinfo replies with video and audio metadata");
+            Check(notices.Count == noticesBefore + 1 && deleted.Any(d => d.MessageId == notices[^1]), "An adapter rejecting reactions falls back to text and recalls it after completion");
+            rejectReactions = false;
             await events.OnEventAsync(Message(Channel.Group("group"), new QuoteSegment("source"), new TextSegment("vclip 0.5 1.5")));
             Check(replies.SelectMany(x => x).OfType<VideoSegment>().Any(v => v.FileName == "clip.mp4"), "vclip replies with a video segment");
             await events.OnEventAsync(Message(Channel.Group("group"), new QuoteSegment("source"), new TextSegment("2mp3")));
@@ -117,6 +141,7 @@ internal static class PluginVerification
             unloaded = true;
             await running;
             Check(tempDirectories.All(d => !File.Exists(Path.Combine(d, "input.mp4"))), "Unload cancels an active download and waits for cleanup");
+            Check(notices.All(id => deleted.Any(d => d.MessageId == id)), "Plugin unload also recalls the active processing notice");
         }
         finally
         {
@@ -134,7 +159,15 @@ internal static class PluginVerification
             var segments = args[1] is string text ? [new TextSegment(text)] : ((IEnumerable<MessageSegment>)args[1]!).ToArray();
             if (quote && segments.OfType<FileSegment>().Any()) throw new Exception("Milky cannot mix quotes and file uploads.");
             replies.Enqueue(segments);
-            return Task.FromResult(new SentMessage(Guid.NewGuid().ToString("N")));
+            var id = Guid.NewGuid().ToString("N");
+            if (segments.OfType<TextSegment>().Any(t => t.Text == "正在处理视频…")) notices.Add(id);
+            return Task.FromResult(new SentMessage(id));
+        }
+
+        object Delete(object?[] args)
+        {
+            deleted.Add((MessageReference)args[0]!);
+            return Task.CompletedTask;
         }
 
         TemporaryDirectory Temp(TimeSpan retention)

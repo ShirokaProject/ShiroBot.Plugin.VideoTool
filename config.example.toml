@@ -1,4 +1,4 @@
-# VideoTool 0.1.1 示例。实际配置继续位于 plugins/VideoToGif/config.toml。
+# VideoTool 0.1.2 示例。实际配置继续位于 plugins/VideoToGif/config.toml。
 # 分组仅用于 WebUI，所有配置键仍位于顶层，不要添加分组表。
 
 # 基础：留空自动检测 PATH，ffprobe 还会尝试 FFmpeg 同目录。
