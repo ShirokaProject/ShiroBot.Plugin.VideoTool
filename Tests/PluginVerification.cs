@@ -26,15 +26,15 @@ internal static class PluginVerification
         var replies = new ConcurrentQueue<MessageSegment[]>();
         var notices = new List<string>();
         var deleted = new List<MessageReference>();
-        var reactions = new List<bool>();
+        var reactions = new List<(string Face, bool Add)>();
+        var failNextOutput = false;
         var rejectReactions = false;
         IQGroupApi? groupApi = null;
         var reactionApi = StubProxy.Make<IQGroupApi>((method, args) =>
         {
             if (method.Name != "SendMessageReactionAsync") throw new NotSupportedException(method.Name);
-            Check((string)args![2]! == "351", "Processing uses the same reaction as MyParser");
             if (rejectReactions) throw new NotSupportedException("Reactions unsupported");
-            reactions.Add((bool)args[3]!);
+            reactions.Add(((string)args![2]!, (bool)args[3]!));
             return Task.CompletedTask;
         });
         var quotedReplies = 0;
@@ -72,7 +72,7 @@ internal static class PluginVerification
             await ((IConfigurableComponent)plugin).ApplyConfigAsync(new PluginConfig { FfmpegPath = ffmpeg, GifsiclePath = gifsicle, Width = 80, Height = 48, DurationSeconds = 0.5, MaxInputMiB = 1 });
             groupApi = reactionApi;
             await events.OnEventAsync(Message(Channel.Group("group"), new QuoteSegment("source"), new TextSegment("2gif")));
-            Check(reactions.SequenceEqual(new[] { true, false }) && notices.Count == 1, "Supported group reactions are added then removed without sending processing text");
+            Check(reactions.SequenceEqual(new[] { ("351", true), ("351", false), ("426", true) }) && notices.Count == 1, "Processing reaction is replaced with MyParser's completion reaction after successful sending");
             var images = replies.SelectMany(x => x).OfType<ImageSegment>().ToArray();
             Check(images.Length == 2 && images[1].Width == 80 && images[1].Height == 48 && quotedReplies == 2, "2gif on a quoted group video converts and quotes the command using hot-updated config");
 
@@ -124,6 +124,9 @@ internal static class PluginVerification
             Check(replies.SelectMany(x => x).OfType<ImageSegment>().Any(v => v.FileName == "cover.jpg"), "vcover replies with a JPEG image");
             await events.OnEventAsync(Message(Channel.Group("group"), new QuoteSegment("source"), new TextSegment("vcompress 0.12")));
             Check(replies.SelectMany(x => x).OfType<VideoSegment>().Any(v => v.FileName == "compressed.mp4"), "vcompress replies with the compressed video");
+            failNextOutput = true;
+            await events.OnEventAsync(Message(Channel.Group("group"), new QuoteSegment("source"), new TextSegment("vinfo")));
+            Check(reactions.TakeLast(3).SequenceEqual(new[] { ("351", true), ("351", false), ("9", true) }), "Failed output sending produces the failure reaction instead of the completion reaction");
             var beforeHelp = tempDirectories.Count;
             await events.OnEventAsync(Message(Channel.Direct("user"), new TextSegment("vhelp")));
             Check(beforeHelp == tempDirectories.Count && replies.SelectMany(x => x).OfType<TextSegment>().Any(t => t.Text.Contains("vclip 00:05 00:15")), "Help works without a quote or download");
@@ -158,7 +161,14 @@ internal static class PluginVerification
             if (quote) quotedReplies++;
             var segments = args[1] is string text ? [new TextSegment(text)] : ((IEnumerable<MessageSegment>)args[1]!).ToArray();
             if (quote && segments.OfType<FileSegment>().Any()) throw new Exception("Milky cannot mix quotes and file uploads.");
+            if (quote && segments.Any(s => s is VideoSegment || s is ImageSegment image && !string.Equals(Path.GetExtension(image.FileName), ".gif", StringComparison.OrdinalIgnoreCase)))
+                throw new Exception("Only GIF media can be sent with a quote.");
             replies.Enqueue(segments);
+            if (failNextOutput)
+            {
+                failNextOutput = false;
+                return Task.FromResult(new SentMessage("") { IsSuccess = false });
+            }
             var id = Guid.NewGuid().ToString("N");
             if (segments.OfType<TextSegment>().Any(t => t.Text == "正在处理视频…")) notices.Add(id);
             return Task.FromResult(new SentMessage(id));

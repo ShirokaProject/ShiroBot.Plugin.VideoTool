@@ -8,7 +8,7 @@ using ShiroBot.SDK.Plugin;
 
 namespace ShiroBot.Plugin.VideoTool;
 
-[BotPlugin("VideoToGif", Name = "VideoTool 视频工具箱", Version = "0.1.2", Author = "greepar",
+[BotPlugin("VideoToGif", Name = "VideoTool 视频工具箱", Version = "0.1.3", Author = "greepar",
     Description = "视频 GIF、截取、MP3、目标大小压缩、封面和信息查询；支持跨平台硬件编码实测、CPU 回退及 WebUI 配置。",
     GithubRepo = "ShirokaProject/ShiroBot.Plugin.VideoTool",
     Category = PluginCategory.Utility, IsPluginSingleFile = true,
@@ -73,6 +73,7 @@ public sealed class VideoToolPlugin : PluginBase<PluginConfig>, IPluginActionPro
         timeout.CancelAfter(TimeSpan.FromSeconds(config.TimeoutSeconds));
         var token = timeout.Token;
         string? input = null;
+        var succeeded = false;
         var notice = new ProcessingNotice(Context, message);
         try
         {
@@ -98,6 +99,7 @@ public sealed class VideoToolPlugin : PluginBase<PluginConfig>, IPluginActionPro
             await DownloadAsync(url, input, config.MaxInputMiB * 1024L * 1024L, token);
             var output = await VideoOperations.ExecuteAsync(command, input, temp.Path, config, token);
             var sent = await SendOutputAsync(message, output, token);
+            succeeded = sent.IsSuccess;
             if (!sent.IsSuccess)
                 await Context.Message.ReplyAsync(message, [new TextSegment("处理已完成，但平台发送失败。请检查适配器的媒体支持、文件权限或降低输出大小。")], token);
             // The host keeps output alive for adapters that upload local files asynchronously.
@@ -115,7 +117,7 @@ public sealed class VideoToolPlugin : PluginBase<PluginConfig>, IPluginActionPro
         }
         finally
         {
-            await notice.ClearAsync();
+            await notice.ClearAsync(succeeded);
             if (input is not null)
             {
                 try { File.Delete(input); }
@@ -177,7 +179,9 @@ public sealed class VideoToolPlugin : PluginBase<PluginConfig>, IPluginActionPro
         MessageSegment segment = output.Kind == OutputKind.Video
             ? new VideoSegment(uri) { FileName = Path.GetFileName(path) }
             : new ImageSegment(uri) { FileName = Path.GetFileName(path), Width = output.Width, Height = output.Height };
-        return Context.Message.QuoteReplyAsync(message, [segment], token);
+        return output.Kind == OutputKind.Image && string.Equals(Path.GetExtension(path), ".gif", StringComparison.OrdinalIgnoreCase)
+            ? Context.Message.QuoteReplyAsync(message, [segment], token)
+            : Context.Message.ReplyAsync(message, [segment], token);
     }
 
     private async Task ReportAsync(MessageEvent message, string text)

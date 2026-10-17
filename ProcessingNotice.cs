@@ -33,17 +33,22 @@ internal sealed class ProcessingNotice(IBotContext context, MessageEvent message
             _text = sent.Reference ?? new MessageReference(message.InstanceId!, message.Channel, sent.MessageId);
     }
 
-    internal async Task ClearAsync()
+    internal async Task ClearAsync(bool succeeded)
     {
         // Cleanup must still run after task cancellation or plugin unload.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        try
+        if (_reactionApi is { } api)
         {
-            if (_reactionApi is { } api)
-                await api.SendMessageReactionAsync(message.Channel.Id, message.MessageId, FaceId, isAdd: false, cancellationToken: timeout.Token);
-            if (_text is { } text)
-                await context.Message.DeleteMessageAsync(text, timeout.Token);
+            await TryAsync(() => api.SendMessageReactionAsync(message.Channel.Id, message.MessageId, FaceId, isAdd: false, cancellationToken: timeout.Token));
+            await TryAsync(() => api.SendMessageReactionAsync(message.Channel.Id, message.MessageId, succeeded ? "426" : "9", cancellationToken: timeout.Token));
         }
-        catch (Exception error) { BotLog.Warning($"VideoTool 无法清理处理中提示：{error.Message}"); }
+        if (_text is { } text)
+            await TryAsync(() => context.Message.DeleteMessageAsync(text, timeout.Token));
+    }
+
+    private static async Task TryAsync(Func<Task> action)
+    {
+        try { await action(); }
+        catch (Exception error) { BotLog.Warning($"VideoTool 无法更新处理状态：{error.Message}"); }
     }
 }
