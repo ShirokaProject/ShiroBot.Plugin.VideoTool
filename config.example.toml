@@ -1,0 +1,48 @@
+# VideoTool 0.1.0 示例。实际配置继续位于 plugins/VideoToGif/config.toml。
+# 分组仅用于 WebUI，所有配置键仍位于顶层，不要添加分组表。
+
+# 基础：留空自动检测 PATH，ffprobe 还会尝试 FFmpeg 同目录。
+ffmpeg_path = ''
+gifsicle_path = ''
+ffprobe_path = ''
+
+# 高级：下载、探测和转码共用超时。输入须严格小于大小上限。
+timeout_seconds = 180
+max_input_mi_b = 30
+max_output_mi_b = 30
+
+# GIF：兼容 VideoToGif 配置键与默认参数。
+start_seconds = 0.5
+duration_seconds = 0.0 # 0 转到结尾
+fps = 12
+width = 512
+height = 512
+fit_mode = 'crop'
+crop_x_percent = 50.0 # 0 左侧，50 居中，100 右侧
+crop_y_percent = 50.0 # 0 顶部，25 偏上，50 居中，100 底部
+scale_algorithm = 'lanczos'
+max_colors = 128
+stats_mode = 'diff'
+dither = 'bayer'
+bayer_scale = 4
+loop = 0
+optimization_level = 3
+lossy = 160
+
+# 视频
+video_max_height = 720
+video_max_fps = 30
+video_preset = 'fast'
+video_crf = 23
+compression_target_mi_b = 10.0
+max_clip_seconds = 300
+cover_quality = 2
+
+# 音频
+mp3_bitrate_kbps = 192
+video_audio_kbps = 128
+
+# 硬件压缩：auto 实测后选择硬件，失败回退 CPU；cpu 固定两遍 libx264。
+compression_encoder = 'auto'
+vaapi_device = '' # 留空枚举 /dev/dri/renderD*；V4L2 设备由 FFmpeg 自动选择
+hardware_probe_seconds = 10 # 每个编码器/设备的测试超时，仍受总任务超时约束

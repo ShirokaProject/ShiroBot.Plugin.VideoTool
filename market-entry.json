@@ -1,0 +1,20 @@
+{
+  "id": "video-tool",
+  "kind": "plugin",
+  "name": "VideoTool 视频工具箱",
+  "description": "视频 GIF、截取、MP3、压缩、封面和信息查询，支持跨平台硬件编码实测、CPU 回退与 WebUI 配置。",
+  "category": "utility",
+  "authors": [
+    {
+      "name": "greepar",
+      "url": "https://github.com/greepar"
+    }
+  ],
+  "repository": "https://github.com/ShirokaProject/ShiroBot.Plugin.VideoTool",
+  "license": "GPL-3.0-only",
+  "release": {
+    "required": true,
+    "assetPattern": "ShiroBot.Plugin.VideoTool.zip"
+  },
+  "deprecated": false
+}

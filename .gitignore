@@ -1,0 +1,9 @@
+bin/
+obj/
+Tests/**/bin/
+Tests/**/obj/
+.shirobot-dev/
+artifacts/
+.DS_Store
+.idea/
+*.user

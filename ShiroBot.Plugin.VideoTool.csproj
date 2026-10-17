@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Version>0.1.0</Version>
+    <Authors>greepar</Authors>
+    <Description>ShiroBot 视频工具箱：GIF、截取、MP3、硬件压缩、封面和信息查询，支持跨平台编码器实际探测及 CPU 回退。</Description>
+    <RepositoryUrl>https://github.com/ShirokaProject/ShiroBot.Plugin.VideoTool</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/ShirokaProject/ShiroBot.Plugin.VideoTool</PackageProjectUrl>
+    <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ShiroBotPluginPackagingEnabled Condition="'$(Configuration)' == 'Release'">true</ShiroBotPluginPackagingEnabled>
+    <ShiroBotPluginSharedAssemblies>ShiroBot.Model.QQ;ShiroBot.Model.Discord;ShiroBot.Model.Telegram</ShiroBotPluginSharedAssemblies>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ShiroBot.SDK" Version="1.0.0" />
+    <Compile Remove="Tests/**/*.cs" />
+    <Compile Remove="scripts/**/*.cs" />
+    <InternalsVisibleTo Include="VideoTool.Verification" />
+  </ItemGroup>
+</Project>
