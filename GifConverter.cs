@@ -47,7 +47,7 @@ internal static class GifConverter
         var completed = false;
         try
         {
-            await RunAsync(ffmpeg, FfmpegArguments(config, input, intermediate), "FFmpeg", token);
+            await ProcessRunner.RunFfmpegAsync(ffmpeg, FfmpegArguments(config, input, intermediate), "FFmpeg", config.FfmpegThreads, token);
             if (!File.Exists(intermediate) || new FileInfo(intermediate).Length == 0)
                 throw new InvalidDataException("FFmpeg 没有生成画面，请检查起始时间是否超过视频长度。");
             await RunAsync(gifsicle, GifsicleArguments(config, intermediate, output), "gifsicle", token);

@@ -73,8 +73,24 @@ public sealed class PluginConfig
     [ConfigField("截取和压缩视频的最大高度；不放大较小的视频，宽度保持比例。", Label = "视频最大高度", Min = 16, Max = 2160, Group = "video", GroupLabel = "视频", GroupOrder = 2, Order = 0)]
     public int VideoMaxHeight { get; set; } = 720;
 
-    [ConfigField("仅 vcompress 使用。auto 实际探测可用硬件后编码，失败回退 CPU；cpu 保持 libx264 两遍编码。指定编码器也会探测并允许回退。", Label = "压缩编码器", Options = ["auto", "cpu", "h264_nvenc", "h264_qsv", "h264_amf", "h264_videotoolbox", "h264_vaapi", "h264_v4l2m2m", "h264_mf", "h264_rkmpp", "h264_omx"], Group = "video", GroupLabel = "视频", GroupOrder = 2, Order = 7)]
+    [ConfigField("auto 探测硬件；指定接口名按压缩格式自动映射为 H.264 或 HEVC 编码器。cpu 表示主动使用软件编码，与回退开关无关。", Label = "压缩编码器", Options = ["auto", "cpu", "h264_nvenc", "h264_qsv", "h264_amf", "h264_videotoolbox", "h264_vaapi", "h264_v4l2m2m", "h264_mf", "h264_rkmpp", "h264_omx"], Group = "video", GroupLabel = "视频", GroupOrder = 2, Order = 7)]
     public string CompressionEncoder { get; set; } = "auto";
+
+    [ConfigField("HEVC 通常压缩效率较高，但需要播放器及平台支持。命令 vcompress 10 hevc 可临时覆盖。", Label = "压缩输出格式", Options = ["h264", "hevc"], Group = "video", GroupLabel = "视频", GroupOrder = 2, Order = 9)]
+    public string CompressionCodec { get; set; } = "h264";
+
+    [ConfigField("默认关闭：硬件失败或无法达到目标时直接报错，不启动软件编码或其探测。打开后允许 libx264/libx265 回退。解码、缩放和音频仍会用 CPU。", Label = "允许 CPU 编码回退", Group = "video", GroupLabel = "视频", GroupOrder = 2, Order = 10)]
+    public bool AllowCpuFallback { get; set; }
+
+    [ConfigField("限制 FFmpeg 解码、编码及滤镜线程数；不是 CPU 使用率硬限制。", Label = "FFmpeg 线程数", Min = 1, Max = 16, Group = "advanced", GroupLabel = "高级", GroupOrder = 4, Order = 7)]
+    public int FfmpegThreads { get; set; } = 2;
+
+    internal PluginConfig ForCompressionCommand(VideoCommand command)
+    {
+        var copy = (PluginConfig)MemberwiseClone();
+        if (command.Codec is { } codec) copy.CompressionCodec = codec;
+        return copy;
+    }
 
     [ConfigField("留空枚举 /dev/dri/renderD*；多显卡可指定一个设备，例如 /dev/dri/renderD129。适用于 VAAPI。V4L2 M2M 由 FFmpeg 自动寻找编码设备。", Label = "VAAPI 设备路径", Group = "video", GroupLabel = "视频", GroupOrder = 2, Order = 8)]
     public string VaapiDevice { get; set; } = "";
@@ -137,6 +153,8 @@ public sealed class PluginConfig
         Range(CropYPercent, 0, 100, "垂直裁剪位置");
         Range(VideoMaxHeight, 16, 2160, "视频最大高度");
         Range(HardwareProbeSeconds, 2, 60, "硬件探测超时");
+        Range(FfmpegThreads, 1, 16, "FFmpeg 线程数");
+        Choice(CompressionCodec, ["h264", "hevc"], "压缩输出格式");
         Choice(CompressionEncoder, ["auto", "cpu", .. HardwareEncoders.Known.Select(x => x.Name)], "压缩编码器");
         Range(VideoMaxFps, 1, 60, "视频最大帧率");
         Range(VideoCrf, 0, 40, "视频 CRF");

@@ -1,4 +1,4 @@
-# VideoTool 0.1.0 示例。实际配置继续位于 plugins/VideoToGif/config.toml。
+# VideoTool 0.1.1 示例。实际配置继续位于 plugins/VideoToGif/config.toml。
 # 分组仅用于 WebUI，所有配置键仍位于顶层，不要添加分组表。
 
 # 基础：留空自动检测 PATH，ffprobe 还会尝试 FFmpeg 同目录。
@@ -42,7 +42,11 @@ cover_quality = 2
 mp3_bitrate_kbps = 192
 video_audio_kbps = 128
 
-# 硬件压缩：auto 实测后选择硬件，失败回退 CPU；cpu 固定两遍 libx264。
+# 压缩：auto 使用硬件；默认禁止 CPU 回退，cpu 表示主动软件编码。
 compression_encoder = 'auto'
 vaapi_device = '' # 留空枚举 /dev/dri/renderD*；V4L2 设备由 FFmpeg 自动选择
 hardware_probe_seconds = 10 # 每个编码器/设备的测试超时，仍受总任务超时约束
+
+compression_codec = 'h264' # 可选 hevc，或用 vcompress 10 hevc 临时指定
+allow_cpu_fallback = false
+ffmpeg_threads = 2

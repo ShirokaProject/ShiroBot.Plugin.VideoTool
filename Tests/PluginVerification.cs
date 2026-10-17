@@ -88,7 +88,7 @@ internal static class PluginVerification
             await events.OnEventAsync(Message(Channel.Direct("user"), new TextSegment("2gifextra")));
             Check(replies.Count == count, "Other command prefixes do not trigger conversion");
 
-            await ((IConfigurableComponent)plugin).ApplyConfigAsync(new PluginConfig { FfmpegPath = ffmpeg, GifsiclePath = gifsicle, VideoMaxHeight = 180, VideoMaxFps = 12, VideoPreset = "veryfast" });
+            await ((IConfigurableComponent)plugin).ApplyConfigAsync(new PluginConfig { FfmpegPath = ffmpeg, GifsiclePath = gifsicle, VideoMaxHeight = 180, VideoMaxFps = 12, VideoPreset = "veryfast", AllowCpuFallback = true });
             quoted = Message(Channel.Group("group"), new VideoSegment(baseUrl + "audio.mp4"));
             await events.OnEventAsync(Message(Channel.Group("group"), new QuoteSegment("source"), new TextSegment("vinfo")));
             Check(replies.SelectMany(x => x).OfType<TextSegment>().Any(t => t.Text.Contains("640×360") && t.Text.Contains("aac")), "Quoted vinfo replies with video and audio metadata");

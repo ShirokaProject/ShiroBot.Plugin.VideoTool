@@ -8,7 +8,7 @@ using ShiroBot.SDK.Plugin;
 
 namespace ShiroBot.Plugin.VideoTool;
 
-[BotPlugin("VideoToGif", Name = "VideoTool 视频工具箱", Version = "0.1.0", Author = "greepar",
+[BotPlugin("VideoToGif", Name = "VideoTool 视频工具箱", Version = "0.1.1", Author = "greepar",
     Description = "视频 GIF、截取、MP3、目标大小压缩、封面和信息查询；支持跨平台硬件编码实测、CPU 回退及 WebUI 配置。",
     GithubRepo = "ShirokaProject/ShiroBot.Plugin.VideoTool",
     Category = PluginCategory.Utility, IsPluginSingleFile = true,

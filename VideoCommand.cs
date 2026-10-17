@@ -5,9 +5,9 @@ namespace ShiroBot.Plugin.VideoTool;
 internal enum ToolOperation { Gif, Clip, Mp3, Compress, Cover, Info, Help, Hardware }
 
 internal sealed record VideoCommand(ToolOperation Operation, double Start = 0, double End = 0,
-    double? TargetMiB = null, string? Url = null, bool QuoteOnly = true, double? CropOffset = null)
+    double? TargetMiB = null, string? Url = null, bool QuoteOnly = true, double? CropOffset = null, string? Codec = null)
 {
-    internal const string Help = "引用视频或带视频后缀的文件，回复：\n2gif — 居中转 GIF\n2gif -25 / 25 — 横屏偏左/右，竖屏偏上/下；-50/50 到边缘\nvclip 00:05 00:15 — 截取片段\n2mp3 — 提取 MP3 文件\nvcompress [目标MiB] — 压缩视频，默认 10 MiB\nvcover [时间] — 截取封面，默认第 0 秒\nvinfo — 查看视频信息\nvhw — 实测硬件编码器，无需引用\nvhelp — 查看帮助\n时间可用秒数、分:秒或时:分:秒。";
+    internal const string Help = "引用视频或带视频后缀的文件，回复：\n2gif — 居中转 GIF\n2gif -25 / 25 — 横屏偏左/右，竖屏偏上/下；-50/50 到边缘\nvclip 00:05 00:15 — 截取片段\n2mp3 — 提取 MP3 文件\nvcompress [目标MiB] [h264|hevc] — 压缩视频，例如 vcompress 10 hevc\nvcover [时间] — 截取封面，默认第 0 秒\nvinfo — 查看视频信息\nvhw — 实测硬件编码器，无需引用\nvhelp — 查看帮助\n时间可用秒数、分:秒或时:分:秒。";
 
     internal static VideoCommand? Parse(string text)
     {
@@ -35,9 +35,11 @@ internal sealed record VideoCommand(ToolOperation Operation, double Start = 0, d
                 return new(ToolOperation.Clip, start, end);
             case "vcompress":
                 if (parts.Length == 1) return new(ToolOperation.Compress);
-                if (parts.Length != 2 || !double.TryParse(parts[1], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var size) || !double.IsFinite(size) || size < 0.1 || size > 256)
-                    throw new ArgumentException("用法：vcompress [目标MiB]，目标大小应在 0.1 到 256 之间，例如 vcompress 10。");
-                return new(ToolOperation.Compress, TargetMiB: size);
+                if (parts.Length is < 2 or > 3 || !double.TryParse(parts[1], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var size) || !double.IsFinite(size) || size < 0.1 || size > 256)
+                    throw new ArgumentException("用法：vcompress [目标MiB] [h264|hevc]，例如 vcompress 10 hevc。大小范围 0.1 到 256 MiB。");
+                var codec = parts.Length == 3 ? parts[2].ToLowerInvariant() : null;
+                if (codec is not (null or "h264" or "hevc")) throw new ArgumentException("压缩格式只支持 h264 或 hevc。");
+                return new(ToolOperation.Compress, TargetMiB: size, Codec: codec);
             default: return null;
         }
     }

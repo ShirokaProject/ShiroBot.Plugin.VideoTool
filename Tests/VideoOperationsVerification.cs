@@ -25,7 +25,7 @@ internal static class VideoOperationsVerification
         var config = new PluginConfig
         {
             FfmpegPath = ffmpeg, VideoMaxHeight = 180, VideoMaxFps = 12, VideoPreset = "veryfast",
-            GifsiclePath = Path.Combine(root, "absent gifsicle"), CompressionTargetMiB = 0.12, CompressionEncoder = "cpu"
+            GifsiclePath = Path.Combine(root, "absent gifsicle"), CompressionTargetMiB = 0.12, CompressionEncoder = "cpu", AllowCpuFallback = true
         };
         var input = Path.Combine(directory, "source with audio.mp4");
         await ProcessRunner.RunAsync(ffmpeg,
@@ -83,9 +83,33 @@ internal static class VideoOperationsVerification
             var busy = await VideoOperations.ExecuteAsync(new(ToolOperation.Compress), input, directory, config, token);
             Check(File.Exists(marker) && busy.Text == "libx264" && new FileInfo(busy.Path!).Length <= 0.12 * 1048576,
                 "Hardware passing probe but failing actual encode automatically falls back to CPU within target");
+            config.AllowCpuFallback = false;
+            var softwareMarker = Path.Combine(directory, "software-encode-started");
+            script = script.Replace("esac\nexec ", "esac\ncase \"$*\" in *'-c:v libx264'*) echo forbidden > " + Q(softwareMarker) + ";; esac\nexec ");
+            await File.WriteAllTextAsync(wrapper, script, token);
+            await Reject<InvalidOperationException>(() => VideoOperations.ExecuteAsync(new(ToolOperation.Compress), input, directory, config, token), "Hardware failure stops immediately when CPU fallback is disabled");
+            Check(!File.Exists(softwareMarker) && !File.Exists(Path.Combine(directory, "compressed.mp4")), "No CPU compression process or partial output after strict hardware failure");
             config.FfmpegPath = ffmpeg;
             config.FfprobePath = "";
         }
+        config.CompressionEncoder = "cpu";
+        config.AllowCpuFallback = true;
+        var hevcOutput = await VideoOperations.ExecuteAsync(new(ToolOperation.Compress, Codec: "hevc"), input, directory, config, token);
+        var hevcInfo = await MediaProbe.ReadAsync(hevcOutput.Path!, config, token);
+        Check(hevcOutput.Text == "libx265" && hevcInfo.VideoCodec == "hevc" && hevcInfo.Size <= 0.12 * 1048576 && hevcInfo.AudioCodec == "aac", "Real HEVC MP4 compression preserves audio and meets target");
+        Check(config.CompressionCodec == "h264", "Per-command HEVC does not mutate global H.264 settings");
+        config.CompressionEncoder = "auto";
+        config.AllowCpuFallback = false;
+        var hevcReport = await HardwareEncoders.ProbeAsync(config.ForCompressionCommand(new(ToolOperation.Compress, Codec: "hevc")), directory, token);
+        if (HardwareEncoders.Select(hevcReport, "auto").Count > 0)
+        {
+            var hwHevc = await VideoOperations.ExecuteAsync(new(ToolOperation.Compress, Codec: "hevc"), input, directory, config, token);
+            Check(hwHevc.Text!.StartsWith("hevc_", StringComparison.Ordinal) && (await MediaProbe.ReadAsync(hwHevc.Path!, config, token)).VideoCodec == "hevc", "Actual hardware-only HEVC output validated without CPU fallback");
+        }
+        else Console.WriteLine("SKIP Real hardware HEVC unavailable on this test host; strict fallback policy covered by simulated failure");
+        var longVideo = new MediaInfo(355.99, 29139927, "mp4", "hevc", 1920, 1080, 30, "aac", 48000, 2);
+        var longBudget = CompressionBudget.Create(longVideo, 10 * 1048576, config);
+        Check(longBudget.VideoRate > 64000 && longBudget.VideoRate < 200000 && longBudget.Height < 720 && longBudget.Fps <= 15, "Six-minute 10 MiB case adapts resolution and fps instead of claiming unavailable hardware");
         var skipped = await VideoOperations.ExecuteAsync(new(ToolOperation.Compress, TargetMiB: 10), input, directory, config, token);
         Check(skipped.Kind == OutputKind.Text && skipped.Text!.Contains("无需压缩"), "Already-small videos skip unnecessary re-encoding");
         await Reject<InvalidDataException>(() => VideoOperations.ExecuteAsync(new(ToolOperation.Mp3), silentInput, directory, config, token), "Silent video reports missing audio");

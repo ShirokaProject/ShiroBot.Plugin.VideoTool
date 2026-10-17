@@ -4,7 +4,7 @@ internal static class HardwareVerification
 {
     internal static async Task RunAsync(string root, string ffmpeg, CancellationToken token)
     {
-        var config = new PluginConfig { FfmpegPath = ffmpeg };
+        var config = new PluginConfig { FfmpegPath = ffmpeg, AllowCpuFallback = true };
         var names = HardwareEncoders.ParseEncoderNames(" V....D h264_v4l2m2m sample\n V....D libx264 sample\n A..... aac audio\n");
         Check(names.SetEquals(["h264_v4l2m2m", "libx264"]), "Encoder listing parser excludes audio and headers");
         var vaapi = new EncoderProfile("h264_vaapi", "VAAPI", "/dev/dri/renderD129");
@@ -32,6 +32,11 @@ internal static class HardwareVerification
         Check(ReferenceEquals(report, await HardwareEncoders.ProbeAsync(config, root, token)), "Repeated probe reuses cached actual results");
         Check(!Directory.EnumerateDirectories(root, "hw-probe-*").Any(), "Probe temporary samples and outputs removed");
         Console.WriteLine(report.Describe());
+        var strict = new PluginConfig { FfmpegPath = ffmpeg, CompressionCodec = "hevc", AllowCpuFallback = false };
+        var hevc = await HardwareEncoders.ProbeAsync(strict, root, token, refresh: true);
+        Check(hevc.Codec == "hevc" && hevc.Encoders.All(s => !s.Profile.Name.StartsWith("libx", StringComparison.Ordinal)), "Hardware-only HEVC probe never tests a software encoder");
+        Check(HardwareEncoders.Candidates(strict).All(s => s.Name.StartsWith("hevc_", StringComparison.Ordinal)), "HEVC uses independently tested HEVC hardware candidates");
+        Console.WriteLine(hevc.Describe());
 
         // A fake executable tests the crucial case: listed does not mean usable.
         if (!OperatingSystem.IsWindows())

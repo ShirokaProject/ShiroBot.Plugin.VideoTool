@@ -17,6 +17,7 @@ internal static class VideoOperations
 
     internal static async Task<ToolOutput> ExecuteAsync(VideoCommand command, string input, string directory, PluginConfig config, CancellationToken token)
     {
+        if (command.Operation == ToolOperation.Compress) config = config.ForCompressionCommand(command);
         config.Validate();
         if (command.Operation == ToolOperation.Gif)
         {
@@ -83,6 +84,7 @@ internal static class VideoOperations
         if (config.CompressionEncoder != "cpu")
         {
             IReadOnlyList<EncoderProfile> profiles = [];
+            var reason = "未找到通过实测的硬件编码器";
             try
             {
                 var report = await HardwareEncoders.ProbeAsync(config, directory, token);
@@ -91,7 +93,8 @@ internal static class VideoOperations
             catch (Exception error) when (error is InvalidOperationException or InvalidDataException)
             {
                 token.ThrowIfCancellationRequested();
-                BotLog.Warning($"VideoTool 硬件探测失败，将回退 CPU：{error.Message}");
+                reason = error.Message;
+                BotLog.Warning($"VideoTool 硬件探测失败：{reason}");
             }
             foreach (var profile in profiles)
             {
@@ -105,30 +108,31 @@ internal static class VideoOperations
                 {
                     token.ThrowIfCancellationRequested();
                     File.Delete(output);
-                    BotLog.Warning($"VideoTool {profile.Name} 实际压缩失败，将尝试其他编码器或 CPU：{error.Message}");
+                    reason = error.Message;
+                    BotLog.Warning($"VideoTool {profile.Name} 未完成本次压缩：{reason}");
                 }
             }
-            BotLog.Info("VideoTool 硬件不可用或未达到目标，回退 CPU libx264 两遍编码。");
+            if (!config.AllowCpuFallback) throw new InvalidOperationException($"{reason}。CPU 编码回退已禁用，任务已停止。可增大目标体积、调整硬件接口或尝试另一种输出格式。");
+            BotLog.Info("VideoTool 允许 CPU 回退，开始软件两遍编码。");
         }
         await CompressCpuAsync(input, output, directory, info, target, config, token);
-        return "libx264";
+        return config.CompressionCodec == "hevc" ? "libx265" : "libx264";
     }
 
     private static async Task CompressHardwareAsync(string input, string output, MediaInfo info, long target, PluginConfig config, EncoderProfile profile, CancellationToken token)
     {
-        var totalRate = target * 8d / info.Duration * 0.90;
-        var audioRate = info.AudioCodec is null ? 0 : Math.Clamp((int)(totalRate * 0.15 / 1000), 32, config.VideoAudioKbps) * 1000;
-        var videoRate = (int)Math.Min(int.MaxValue, totalRate - audioRate);
+        var budget = CompressionBudget.Create(info, target, config);
         for (var attempt = 0; attempt < 3; attempt++)
         {
-            if (videoRate < 64000) throw new InvalidDataException("硬件编码目标码率过低。");
+            BotLog.Info($"VideoTool {profile.Name} 尝试 {attempt + 1}/3：视频 {budget.VideoRate / 1000} kbps、音频 {budget.AudioRate / 1000} kbps，最高 {budget.Height}p/{budget.Fps} fps，目标 {target} 字节。");
             var args = Input(input);
             args.InsertRange(0, profile.InputArguments);
-            args.AddRange(["-map", "0:v:0", "-vf", profile.Filter(VideoFilter(info, config))]);
+            args.AddRange(["-map", "0:v:0", "-vf", profile.Filter(VideoFilter(info, config, budget.Height, budget.Fps))]);
             args.AddRange(profile.EncodingArguments);
-            args.AddRange(["-b:v", N(videoRate)]);
-            if (audioRate > 0) args.AddRange(["-map", "0:a:0", "-c:a", "aac", "-b:a", N(audioRate)]);
+            args.AddRange(["-b:v", N(budget.VideoRate), "-maxrate", N(budget.VideoRate), "-bufsize", N(budget.VideoRate * 2d)]);
+            if (budget.AudioRate > 0) args.AddRange(["-map", "0:a:0", "-c:a", "aac", "-b:a", N(budget.AudioRate)]);
             else args.Add("-an");
+            if (config.CompressionCodec == "hevc") args.AddRange(["-tag:v", "hvc1"]);
             args.AddRange(["-movflags", "+faststart", output]);
             await RunAsync(config, args, token);
             if (!File.Exists(output) || new FileInfo(output).Length == 0) throw new InvalidDataException("硬件编码没有输出有效视频。");
@@ -136,38 +140,40 @@ internal static class VideoOperations
             if (actual <= target)
             {
                 var encoded = await MediaProbe.ReadAsync(output, config, token);
-                if (encoded.VideoCodec != "h264" || Math.Abs(encoded.Duration - info.Duration) > Math.Max(0.5, info.Duration * 0.01) ||
+                if (encoded.VideoCodec != config.CompressionCodec || Math.Abs(encoded.Duration - info.Duration) > Math.Max(0.5, info.Duration * 0.01) ||
                     (info.AudioCodec is not null && encoded.AudioCodec is null))
                     throw new InvalidDataException("硬件输出的视频编码、时长或音轨验证失败。");
                 return;
             }
-            videoRate = (int)(videoRate * target / (double)actual * 0.85);
+            BotLog.Info($"VideoTool {profile.Name} 输出 {actual} 字节，超过目标 {target}，降低分辨率/帧率及码率再试。");
+            budget = budget.Retry(target, actual);
         }
-        throw new InvalidDataException("硬件编码三次尝试后仍超出目标大小。");
+        throw new InvalidDataException("硬件编码可用，但三次体积调整后仍超出目标大小，并非硬件探测失败");
     }
 
     private static async Task CompressCpuAsync(string input, string output, string directory, MediaInfo info, long target, PluginConfig config, CancellationToken token)
     {
-        var totalRate = target * 8d / info.Duration * 0.92;
-        var audioRate = info.AudioCodec is null ? 0 : Math.Clamp((int)(totalRate * 0.15 / 1000), 32, config.VideoAudioKbps) * 1000;
-        var videoRate = (int)Math.Min(int.MaxValue, totalRate - audioRate);
+        var budget = CompressionBudget.Create(info, target, config);
+        var videoRate = budget.VideoRate;
+        var audioRate = budget.AudioRate;
         var passLog = Path.Combine(directory, "video-pass");
         try
         {
             for (var attempt = 0; attempt < 2; attempt++)
             {
-                if (videoRate < 64000) throw new ArgumentException("目标大小过小，无法保留可用画质，请增大目标或先截取片段。");
+                if (videoRate < 16000) throw new ArgumentException("目标大小过小，无法保留可用画质，请增大目标或先截取片段。");
                 for (var pass = 1; pass <= 2; pass++)
                 {
                     var args = Input(input);
-                    args.AddRange(["-map", "0:v:0", "-vf", VideoFilter(info, config)]);
-                    args.AddRange(VideoEncoding(config));
+                    args.AddRange(["-map", "0:v:0", "-vf", VideoFilter(info, config, budget.Height, budget.Fps)]);
+                    args.AddRange(VideoEncoding(config, compression: true));
                     args.AddRange(["-b:v", N(videoRate), "-pass", N(pass), "-passlogfile", passLog]);
                     if (pass == 1) args.AddRange(["-an", "-f", "null", "-"]);
                     else
                     {
                         if (audioRate > 0) args.AddRange(["-map", "0:a:0", "-c:a", "aac", "-b:a", N(audioRate)]);
                         else args.Add("-an");
+                        if (config.CompressionCodec == "hevc") args.AddRange(["-tag:v", "hvc1"]);
                         args.AddRange(["-movflags", "+faststart", output]);
                     }
                     await RunAsync(config, args, token);
@@ -187,10 +193,12 @@ internal static class VideoOperations
     private static List<string> Input(string path, double start = 0) =>
         ["-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-ss", N(start), "-protocol_whitelist", "file,pipe", "-i", path, "-map_metadata", "-1"];
 
-    private static string[] VideoEncoding(PluginConfig config) => ["-c:v", "libx264", "-preset", config.VideoPreset, "-pix_fmt", "yuv420p"];
-    private static string VideoFilter(MediaInfo info, PluginConfig config) =>
-        FormattableString.Invariant($"scale=trunc(iw*min(1\\,{config.VideoMaxHeight}/ih)/2)*2:trunc(ih*min(1\\,{config.VideoMaxHeight}/ih)/2)*2,fps={N(info.Fps > 0 ? Math.Min(info.Fps, config.VideoMaxFps) : config.VideoMaxFps)}");
+    private static string[] VideoEncoding(PluginConfig config, bool compression = false) => compression && config.CompressionCodec == "hevc"
+        ? ["-c:v", "libx265", "-preset", config.VideoPreset, "-pix_fmt", "yuv420p", "-x265-params", $"pools={config.FfmpegThreads}:frame-threads=1"]
+        : ["-c:v", "libx264", "-preset", config.VideoPreset, "-pix_fmt", "yuv420p"];
+    private static string VideoFilter(MediaInfo info, PluginConfig config, int? height = null, int? fps = null) =>
+        FormattableString.Invariant($"scale=trunc(iw*min(1\\,{height ?? config.VideoMaxHeight}/ih)/2)*2:trunc(ih*min(1\\,{height ?? config.VideoMaxHeight}/ih)/2)*2,fps={N(info.Fps > 0 ? Math.Min(info.Fps, fps ?? config.VideoMaxFps) : fps ?? config.VideoMaxFps)}");
     private static string N(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
     private static Task<string> RunAsync(PluginConfig config, IEnumerable<string> args, CancellationToken token) =>
-        ProcessRunner.RunAsync(ExecutableLocator.Resolve(config.FfmpegPath, "ffmpeg"), args, "FFmpeg", token);
+        ProcessRunner.RunFfmpegAsync(ExecutableLocator.Resolve(config.FfmpegPath, "ffmpeg"), args, "FFmpeg", config.FfmpegThreads, token);
 }

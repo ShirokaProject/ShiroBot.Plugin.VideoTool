@@ -6,6 +6,15 @@ namespace ShiroBot.Plugin.VideoTool;
 
 internal static class ProcessRunner
 {
+    internal static Task<string> RunFfmpegAsync(string executable, IEnumerable<string> arguments, string name, int threads, CancellationToken token)
+    {
+        var args = arguments.ToList();
+        var input = args.IndexOf("-i");
+        if (input >= 0) args.InsertRange(input, ["-threads", threads.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+        args.InsertRange(0, ["-filter_threads", threads.ToString(System.Globalization.CultureInfo.InvariantCulture), "-filter_complex_threads", threads.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+        args.InsertRange(args.Count - 1, ["-threads", threads.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+        return RunAsync(executable, args, name, token);
+    }
     internal static async Task<string> RunAsync(string executable, IEnumerable<string> arguments, string name, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();

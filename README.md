@@ -17,6 +17,7 @@
 | `vclip 00:05 00:15` | 截取第 5 到 15 秒，输出 MP4 |
 | `2mp3` | 提取音轨，发送 MP3 文件 |
 | `vcompress 10` | 压缩到 10 MiB 以内，不填大小默认 10 MiB |
+| `vcompress 10 hevc` | 本次使用 HEVC 压缩，也可填 `h264` |
 | `vcover 00:03` | 截取第 3 秒封面，不填时间默认第 0 秒 |
 | `vinfo` | 查看视频时长、尺寸、编码等信息 |
 
@@ -27,4 +28,6 @@ GIF 偏移范围 **-50～50**：0 居中，-50 最左/上，50 最右/下。时�
 ## 配置
 
 在 WebUI 调整 GIF、视频、音频参数及大小限制。输入默认须小于 **30 MiB**，任务默认超时 **180 秒**。
-`vcompress` 默认自动探测硬件编码，失败时回退 CPU。详细配置见 [config.example.toml](config.example.toml)。
+`vcompress` 默认自动探测硬件，**禁止 CPU 编码回退**，失败直接停止。WebUI「视频」可选择 H.264/HEVC、是否允许 CPU 回退；主动选择 `cpu` 则使用软件编码。HEVC 需要播放器及平台支持。
+
+FFmpeg 线程数默认 2，可在「高级」调整。硬件编码不等于零 CPU：解码、缩放和音频处理仍会用 CPU；截取和 GIF 也仍会使用 CPU。详细配置见 [config.example.toml](config.example.toml)。
