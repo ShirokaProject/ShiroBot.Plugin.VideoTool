@@ -1,10 +1,9 @@
 # VideoTool 视频工具箱
 
-ShiroBot 视频处理插件，群聊、私聊均可使用。
-
 ## 安装
 
-将 `ShiroBot.Plugin.VideoTool.dll` 放入宿主 `plugins/` 目录并启用。
+在插件市场内安装。
+或者将 `ShiroBot.Plugin.VideoTool.dll` 放入宿主 `plugins/` 目录并启用。
 需要自行安装 **FFmpeg（含 ffprobe）和 gifsicle**。插件会自动从 PATH 查找，也可在 WebUI 中填写程序路径。
 
 ## 用法
